@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OGN Tracker — Glider Incidents</title>
+    <style>
+        :root {
+            --bg: #0a0e17;
+            --surface: #131927;
+            --border: #1e2a3a;
+            --text: #e0e6ed;
+            --text-dim: #6b7b8d;
+            --accent: #3b82f6;
+            --green: #22c55e;
+            --orange: #f59e0b;
+            --red: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; }
+
+        #map { width: 100%; height: 100vh; }
+
+        /* Top bar */
+        .top-bar {
+            position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+            display: flex; align-items: center; gap: 1rem;
+            padding: 0.75rem 1rem;
+            background: linear-gradient(180deg, rgba(10,14,23,0.95) 0%, rgba(10,14,23,0.8) 80%, transparent 100%);
+            pointer-events: none;
+        }
+        .top-bar > * { pointer-events: auto; }
+
+        .logo {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-size: 1rem; font-weight: 700; color: var(--text);
+            text-decoration: none; white-space: nowrap;
+        }
+        .logo svg { width: 24px; height: 24px; fill: var(--accent); }
+
+        .stats-bar {
+            display: flex; gap: 1.25rem; margin-left: auto;
+            font-size: 0.8125rem;
+        }
+        .stat { display: flex; align-items: center; gap: 0.375rem; }
+        .stat-value { font-weight: 700; color: var(--text); }
+        .stat-label { color: var(--text-dim); }
+        .stat-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .stat-dot.live { background: var(--green); animation: pulse 2s infinite; }
+        .stat-dot.glider { background: var(--accent); }
+        .stat-dot.tow { background: var(--orange); }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Controls */
+        .controls {
+            position: absolute; top: 60px; right: 1rem; z-index: 10;
+            display: flex; flex-direction: column; gap: 0.5rem;
+        }
+
+        .control-btn {
+            background: var(--surface); border: 1px solid var(--border);
+            color: var(--text); padding: 0.5rem 0.75rem; border-radius: 8px;
+            font-size: 0.75rem; cursor: pointer; white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .control-btn:hover { border-color: var(--accent); }
+        .control-btn.active { background: var(--accent); border-color: var(--accent); }
+
+        /* Info panel */
+        .info-panel {
+            position: absolute; bottom: 1rem; left: 1rem; z-index: 10;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1rem; min-width: 280px; max-width: 360px;
+            display: none; font-size: 0.8125rem;
+        }
+        .info-panel.visible { display: block; }
+        .info-panel-title {
+            font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .info-panel-close { cursor: pointer; color: var(--text-dim); font-size: 1.25rem; }
+        .info-row { display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: var(--text-dim); }
+        .info-value { font-weight: 600; }
+
+        /* Stats panel */
+        .stats-panel {
+            position: absolute; bottom: 1rem; right: 1rem; z-index: 10;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1rem; min-width: 240px;
+            display: none; font-size: 0.8125rem;
+        }
+        .stats-panel.visible { display: block; }
+        .stats-panel h3 { font-size: 0.9rem; margin-bottom: 0.75rem; }
+
+        /* Loading overlay */
+        .loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 20; color: var(--text-dim); font-size: 0.875rem;
+        }
+
+        /* Responsive */
+        /* Search box */
+        .search-box {
+            display: flex; margin-left: 0.5rem;
+        }
+        .search-box input {
+            background: var(--surface); border: 1px solid var(--border); color: var(--text);
+            padding: 0.375rem 0.625rem; border-radius: 6px; font-size: 0.8125rem;
+            width: 150px; outline: none; transition: border-color 0.15s;
+        }
+        .search-box input:focus { border-color: var(--accent); }
+        .search-box input::placeholder { color: var(--text-dim); }
+
+        @media (max-width: 600px) {
+            .stats-bar { display: none; }
+            .search-box { display: none; }
+            .info-panel { left: 0.5rem; right: 0.5rem; min-width: auto; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="top-bar">
+    <a class="logo" href="https://gliderincidents.com" target="_blank">
+        <svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+        OGN Tracker
+    </a>
+    <div class="stats-bar">
+        <div class="stat">
+            <div class="stat-dot live"></div>
+            <span class="stat-value" id="stat-active">—</span>
+            <span class="stat-label">active</span>
+        </div>
+        <div class="stat">
+            <div class="stat-dot glider"></div>
+            <span class="stat-value" id="stat-gliders">—</span>
+            <span class="stat-label">gliders</span>
+        </div>
+        <div class="stat">
+            <div class="stat-dot tow"></div>
+            <span class="stat-value" id="stat-tow">—</span>
+            <span class="stat-label">tow planes</span>
+        </div>
+        <div class="stat">
+            <span class="stat-value" id="stat-ddb">—</span>
+            <span class="stat-label">📡 DDB</span>
+        </div>
+        <div class="stat">
+            <span class="stat-value" id="stat-total-positions">—</span>
+            <span class="stat-label">total positions</span>
+        </div>
+    </div>
+    <a href="dashboard.html" style="color:var(--accent);font-size:0.8125rem;text-decoration:none;white-space:nowrap;margin-left:0.5rem;">📊 Dashboard</a>
+    <form class="search-box" id="search-form" onsubmit="doSearch(event)">
+        <input type="text" id="search-input" placeholder="Search reg or ID…" autocomplete="off">
+    </form>
+</div>
+
+<div class="controls">
+    <button class="control-btn active" id="btn-live" onclick="toggleLive()">● Live</button>
+    <button class="control-btn" id="btn-heatmap" onclick="toggleHeatmap()">🔥 Heatmap</button>
+    <button class="control-btn" id="btn-stats" onclick="toggleStats()">📊 Stats</button>
+</div>
+
+<div class="info-panel" id="info-panel">
+    <div class="info-panel-title">
+        <span id="info-title">Aircraft</span>
+        <span class="info-panel-close" onclick="closeInfoPanel()">✕</span>
+    </div>
+    <div id="info-content"></div>
+</div>
+
+<div class="stats-panel" id="stats-panel">
+    <h3>Collection Stats</h3>
+    <div id="stats-content">Loading...</div>
+</div>
+
+<div id="map"></div>
+<div class="loading" id="loading">Loading map...</div>
+
+<script>
+let map, markers = {}, trackLine = null, heatmapLayer = null;
+let liveInterval = null, isLive = true, isHeatmap = false;
+const API = 'api.php';
+const AIRCRAFT_TYPES = { 1: 'Glider', 2: 'Tow Plane' };
+const TYPE_COLORS = { 1: '#3b82f6', 2: '#f59e0b' };
+
+async function initMap() {
+    document.getElementById('loading').style.display = 'none';
+
+    map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 47.730397918870935, lng: 12.439012742234423 }, // Unterwoessen airfield
+        zoom: 15,
+        mapTypeId: 'hybrid',
+        styles: [
+            { elementType: 'geometry', stylers: [{ color: '#1a1a2e' }] },
+            { elementType: 'labels.text.stroke', stylers: [{ color: '#1a1a2e' }] },
+            { elementType: 'labels.text.fill', stylers: [{ color: '#4a5568' }] },
+            { featureType: 'road', stylers: [{ visibility: 'off' }] },
+            { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0e1a2b' }] },
+            { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#16213e' }] },
+            { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+            { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#2a3a4a' }] },
+            { featureType: 'administrative.country', elementType: 'labels.text.fill', stylers: [{ color: '#3a4a5a' }] },
+        ],
+        disableDefaultUI: true,
+        zoomControl: true,
+        mapTypeControl: true,
+        mapTypeControlOptions: { position: google.maps.ControlPosition.BOTTOM_LEFT },
+    });
+
+    startLive();
+    loadStats();
+}
+
+function createGliderIcon(track, type) {
+    const color = TYPE_COLORS[type] || '#3b82f6';
+    const rotation = track || 0;
+    // Top-down glider silhouette: nose up, swept wings, narrow tail
+    return {
+        path: 'M12,1 L23,13 L17,11 L15,23 L12,20 L9,23 L7,11 L1,13 Z',
+        fillColor: color,
+        fillOpacity: 0.9,
+        strokeColor: '#fff',
+        strokeWeight: 1,
+        rotation: rotation,
+        scale: 1.3,
+        anchor: new google.maps.Point(12, 12),
+    };
+}
+
+async function fetchLive() {
+    try {
+        const resp = await fetch(`${API}?action=live&minutes=10`, {credentials: 'same-origin'});
+        const data = await resp.json();
+        updateMarkers(data.aircraft);
+        updateLiveStats(data);
+    } catch (e) {
+        console.error('Live fetch error:', e);
+    }
+}
+
+function updateMarkers(aircraft) {
+    const activeIds = new Set();
+
+    aircraft.forEach(ac => {
+        activeIds.add(ac.device_id);
+        const title = ac.registration ? `${ac.registration}${ac.aircraft_model ? ' (' + ac.aircraft_model + ')' : ''}` : ac.device_id;
+        const label = ac.cn ? { text: ac.cn, color: '#fff', fontSize: '10px', fontWeight: '700' } : undefined;
+
+        if (markers[ac.device_id]) {
+            const m = markers[ac.device_id];
+            m.setPosition({ lat: ac.latitude, lng: ac.longitude });
+            m.setIcon(createGliderIcon(ac.track_deg, ac.aircraft_type));
+            m.setTitle(title);
+            if (label) m.setLabel(label); else m.setLabel(null);
+            m.acData = ac;
+        } else {
+            const opts = {
+                position: { lat: ac.latitude, lng: ac.longitude },
+                map: map,
+                icon: createGliderIcon(ac.track_deg, ac.aircraft_type),
+                title: title,
+            };
+            if (label) opts.label = label;
+            const marker = new google.maps.Marker(opts);
+            marker.acData = ac;
+            marker.addListener('click', () => showAircraftInfo(ac.device_id));
+            markers[ac.device_id] = marker;
+        }
+    });
+
+    // Remove stale markers
+    Object.keys(markers).forEach(id => {
+        if (!activeIds.has(id)) {
+            markers[id].setMap(null);
+            delete markers[id];
+        }
+    });
+}
+
+function updateLiveStats(data) {
+    const gliders = data.aircraft.filter(a => a.aircraft_type === 1).length;
+    const tow = data.aircraft.filter(a => a.aircraft_type === 2).length;
+    const ddb = data.aircraft.filter(a => a.registration).length;
+    document.getElementById('stat-active').textContent = data.count;
+    document.getElementById('stat-gliders').textContent = gliders;
+    document.getElementById('stat-tow').textContent = tow;
+    document.getElementById('stat-ddb').textContent = ddb;
+}
+
+function showAircraftInfo(deviceId) {
+    const m = markers[deviceId];
+    if (!m) return;
+    const ac = m.acData;
+
+    const typeName = AIRCRAFT_TYPES[ac.aircraft_type] || `Type ${ac.aircraft_type}`;
+    const climbIcon = ac.climb_rate_ms > 0.5 ? '↑' : ac.climb_rate_ms < -0.5 ? '↓' : '—';
+    const age = timeSince(ac.received_at);
+    const reg = ac.registration || '<span style="color:var(--text-dim)">Unknown</span>';
+    const model = ac.aircraft_model || '—';
+    const cn = ac.cn || '—';
+
+    document.getElementById('info-title').textContent = ac.registration ? `${ac.registration}` : `${typeName} — ${ac.device_id}`;
+    document.getElementById('info-content').innerHTML = `
+        <div class="info-row"><span class="info-label">Registration</span><span class="info-value">${reg}</span></div>
+        <div class="info-row"><span class="info-label">Model</span><span class="info-value">${model}</span></div>
+        <div class="info-row"><span class="info-label">CN</span><span class="info-value">${cn}</span></div>
+        <div class="info-row"><span class="info-label">Type</span><span class="info-value">${typeName}</span></div>
+        <div class="info-row"><span class="info-label">Device ID</span><span class="info-value" style="font-size:0.7rem">${ac.device_id}</span></div>
+        <div class="info-row"><span class="info-label">Altitude</span><span class="info-value">${ac.altitude_m} m</span></div>
+        <div class="info-row"><span class="info-label">Speed</span><span class="info-value">${ac.ground_speed_kph.toFixed(0)} km/h</span></div>
+        <div class="info-row"><span class="info-label">Heading</span><span class="info-value">${ac.track_deg}°</span></div>
+        <div class="info-row"><span class="info-label">Climb</span><span class="info-value">${climbIcon} ${ac.climb_rate_ms.toFixed(1)} m/s</span></div>
+        <div class="info-row"><span class="info-label">Signal</span><span class="info-value">${ac.signal_db} dB</span></div>
+        <div class="info-row"><span class="info-label">Position</span><span class="info-value">${ac.latitude.toFixed(4)}, ${ac.longitude.toFixed(4)}</span></div>
+        <div class="info-row"><span class="info-label">Last seen</span><span class="info-value">${age}</span></div>
+        <div style="margin-top: 0.75rem;">
+            <button class="control-btn" onclick="loadTrack('${ac.device_id}')">Show Track (24h)</button>
+        </div>
+    `;
+    document.getElementById('info-panel').classList.add('visible');
+}
+
+async function loadTrack(deviceId) {
+    try {
+        const resp = await fetch(`${API}?action=track&device_id=${deviceId}&hours=24`, {credentials: 'same-origin'});
+        const data = await resp.json();
+
+        if (trackLine) trackLine.setMap(null);
+
+        if (data.points.length > 0) {
+            const path = data.points.map(p => ({ lat: p.latitude, lng: p.longitude }));
+            trackLine = new google.maps.Polyline({
+                path: path,
+                geodesic: true,
+                strokeColor: '#3b82f6',
+                strokeOpacity: 0.8,
+                strokeWeight: 2,
+                map: map,
+            });
+        }
+    } catch (e) {
+        console.error('Track fetch error:', e);
+    }
+}
+
+async function loadStats() {
+    try {
+        const resp = await fetch(`${API}?action=stats`, {credentials: 'same-origin'});
+        const data = await resp.json();
+        document.getElementById('stat-total-positions').textContent = formatNum(data.total_positions);
+
+        document.getElementById('stats-content').innerHTML = `
+            <div class="info-row"><span class="info-label">Total positions</span><span class="info-value">${formatNum(data.total_positions)}</span></div>
+            <div class="info-row"><span class="info-label">Unique aircraft</span><span class="info-value">${data.unique_devices}</span></div>
+            <div class="info-row"><span class="info-label">Today positions</span><span class="info-value">${formatNum(data.today_positions)}</span></div>
+            <div class="info-row"><span class="info-label">Today aircraft</span><span class="info-value">${data.today_devices}</span></div>
+            <div class="info-row"><span class="info-label">Active now</span><span class="info-value">${data.active_now}</span></div>
+            <div class="info-row"><span class="info-label">DB size</span><span class="info-value">${data.db_size_mb} MB</span></div>
+        `;
+    } catch (e) {
+        console.error('Stats fetch error:', e);
+    }
+}
+
+async function toggleHeatmap() {
+    isHeatmap = !isHeatmap;
+    document.getElementById('btn-heatmap').classList.toggle('active', isHeatmap);
+
+    if (isHeatmap) {
+        const resp = await fetch(`${API}?action=heatmap&days=30`, {credentials: 'same-origin'});
+        const data = await resp.json();
+
+        const heatData = data.points.map(p => ({
+            location: new google.maps.LatLng(p.lat, p.lng),
+            weight: p.weight,
+        }));
+
+        if (heatmapLayer) heatmapLayer.setMap(null);
+        heatmapLayer = new google.maps.visualization.HeatmapLayer({
+            data: heatData,
+            radius: 20,
+            opacity: 0.6,
+        });
+        heatmapLayer.setMap(map);
+    } else {
+        if (heatmapLayer) {
+            heatmapLayer.setMap(null);
+            heatmapLayer = null;
+        }
+    }
+}
+
+function toggleLive() {
+    isLive = !isLive;
+    document.getElementById('btn-live').classList.toggle('active', isLive);
+    if (isLive) startLive(); else stopLive();
+}
+
+function startLive() {
+    fetchLive();
+    if (liveInterval) clearInterval(liveInterval);
+    liveInterval = setInterval(fetchLive, 10000);
+}
+
+function stopLive() {
+    if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
+}
+
+function toggleStats() {
+    const panel = document.getElementById('stats-panel');
+    panel.classList.toggle('visible');
+    if (panel.classList.contains('visible')) loadStats();
+}
+
+function closeInfoPanel() {
+    document.getElementById('info-panel').classList.remove('visible');
+    if (trackLine) { trackLine.setMap(null); trackLine = null; }
+}
+
+function timeSince(dateStr) {
+    const d = new Date(dateStr.replace(' ', 'T') + 'Z');
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+}
+
+function formatNum(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+}
+
+async function doSearch(e) {
+    e.preventDefault();
+    const q = document.getElementById('search-input').value.trim();
+    if (!q) return;
+
+    // Check live markers first
+    for (const [id, m] of Object.entries(markers)) {
+        const ac = m.acData;
+        if (ac.device_id === q || (ac.registration && ac.registration.toUpperCase() === q.toUpperCase())) {
+            map.panTo(m.getPosition());
+            map.setZoom(12);
+            showAircraftInfo(id);
+            return;
+        }
+    }
+
+    // Query API
+    const isReg = /^[A-Z]{1,2}-/.test(q.toUpperCase());
+    const param = isReg ? `registration=${encodeURIComponent(q)}` : `device_id=${encodeURIComponent(q)}`;
+    try {
+        const resp = await fetch(`${API}?action=device&${param}`, {credentials: 'same-origin'});
+        const data = await resp.json();
+        if (data && data.device_id) {
+            // Check if live
+            if (markers[data.device_id]) {
+                const m = markers[data.device_id];
+                map.panTo(m.getPosition());
+                map.setZoom(12);
+                showAircraftInfo(data.device_id);
+            } else {
+                // Show DDB info in panel
+                const reg = data.registration || '<span style="color:var(--text-dim)">Unknown</span>';
+                document.getElementById('info-title').textContent = data.registration || data.device_id;
+                document.getElementById('info-content').innerHTML = `
+                    <div class="info-row"><span class="info-label">Registration</span><span class="info-value">${reg}</span></div>
+                    <div class="info-row"><span class="info-label">Model</span><span class="info-value">${data.aircraft_model || '—'}</span></div>
+                    <div class="info-row"><span class="info-label">CN</span><span class="info-value">${data.cn || '—'}</span></div>
+                    <div class="info-row"><span class="info-label">Device ID</span><span class="info-value" style="font-size:0.7rem">${data.device_id}</span></div>
+                    <div style="margin-top:0.75rem;color:var(--text-dim);font-style:italic;">Not currently tracked</div>
+                `;
+                document.getElementById('info-panel').classList.add('visible');
+            }
+        } else {
+            document.getElementById('info-title').textContent = 'Search';
+            document.getElementById('info-content').innerHTML = '<div style="color:var(--text-dim)">No results found.</div>';
+            document.getElementById('info-panel').classList.add('visible');
+        }
+    } catch (e) {
+        console.error('Search error:', e);
+    }
+}
+
+// Load Google Maps
+(async () => {
+    const resp = await fetch(`${API}?action=config`, {credentials: 'same-origin'});
+    const config = await resp.json();
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=visualization`;
+    script.async = true;
+    document.head.appendChild(script);
+})();
+</script>
+</body>
+</html>
