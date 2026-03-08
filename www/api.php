@@ -39,52 +39,92 @@ $action = $_GET['action'] ?? 'live';
 
 switch ($action) {
 
-    // Demo/replay mode — replays peak March 7 data, cycling every 30 min
-    // Identical response shape to 'live' so the frontend works unchanged
+    // Demo mode — synthetic fleet positions near Unterwoessen, computed from time
+    // Aircraft move continuously: thermals, glides, circuit. Identical response to 'live'.
     case 'demo':
-        $cycleSeconds = 1800; // 30-minute replay cycle
-        $replayStart  = strtotime('2026-03-07 12:00:00 UTC');
-        $virtualNow   = $replayStart + (time() % $cycleSeconds);
-        $virtualFrom  = date('Y-m-d H:i:s', $virtualNow - 600); // 10-min window
-        $virtualTo    = date('Y-m-d H:i:s', $virtualNow);
+        $t = time();
 
-        $result = $db->query("
-            SELECT p.device_id, p.latitude, p.longitude, p.altitude_m,
-                   p.ground_speed_kph, p.track_deg, p.climb_rate_ms,
-                   p.aircraft_type, p.received_at, p.signal_db,
-                   d.registration, d.aircraft_model, d.cn, d.tracked, d.identified
-            FROM ogn_positions p
-            INNER JOIN (
-                SELECT device_id, MAX(received_at) as max_received
-                FROM ogn_positions
-                WHERE received_at BETWEEN '$virtualFrom' AND '$virtualTo'
-                GROUP BY device_id
-            ) latest ON p.device_id = latest.device_id AND p.received_at = latest.max_received
-            LEFT JOIN ogn_ddb d ON p.device_id = d.device_id
-            ORDER BY p.received_at DESC
-        ");
+        // Each entry: reg, cn, model, aircraft_type, pattern, center_lat, center_lng,
+        //   alt_m, speed_kph, radius_deg (thermal) or leg_km (glide), period_s, phase_offset
+        // Patterns: 'thermal' = slow circle; 'glide' = back-and-forth straight line; 'circuit' = tight oval
+        $fleet = [
+            ['reg'=>'D-7507','cn'=>'HM','model'=>'ASK 13',  'type'=>1,'pattern'=>'thermal','clat'=>47.712,'clng'=>12.461,'alt'=>1850,'spd'=>80, 'radius'=>0.018,'period'=>120,'phase'=>0.0],
+            ['reg'=>'D-1800','cn'=>'HN','model'=>'ASK 13',  'type'=>1,'pattern'=>'thermal','clat'=>47.745,'clng'=>12.405,'alt'=>1650,'spd'=>75, 'radius'=>0.020,'period'=>135,'phase'=>1.2],
+            ['reg'=>'D-1670','cn'=>'HO','model'=>'ASK 13',  'type'=>1,'pattern'=>'glide',  'clat'=>47.735,'clng'=>12.430,'alt'=>1400,'spd'=>100,'leg'=>0.060,'period'=>180,'phase'=>0.5],
+            ['reg'=>'D-3982','cn'=>'HP','model'=>'ASK 13',  'type'=>1,'pattern'=>'thermal','clat'=>47.720,'clng'=>12.475,'alt'=>2100,'spd'=>80, 'radius'=>0.016,'period'=>110,'phase'=>2.1],
+            ['reg'=>'D-1375','cn'=>'HQ','model'=>'ASK 13',  'type'=>1,'pattern'=>'glide',  'clat'=>47.760,'clng'=>12.450,'alt'=>1200,'spd'=>110,'leg'=>0.080,'period'=>200,'phase'=>1.8],
+            ['reg'=>'D-8474','cn'=>'K1','model'=>'K 8',     'type'=>1,'pattern'=>'thermal','clat'=>47.728,'clng'=>12.420,'alt'=>1550,'spd'=>70, 'radius'=>0.015,'period'=>125,'phase'=>3.0],
+            ['reg'=>'D-7130','cn'=>'K2','model'=>'K 8',     'type'=>1,'pattern'=>'circuit', 'clat'=>47.730,'clng'=>12.439,'alt'=>650, 'spd'=>120,'leg'=>0.030,'period'=>90, 'phase'=>0.3],
+            ['reg'=>'D-1864','cn'=>'23','model'=>'ASK 23',  'type'=>1,'pattern'=>'glide',  'clat'=>47.695,'clng'=>12.455,'alt'=>1800,'spd'=>115,'leg'=>0.100,'period'=>220,'phase'=>0.9],
+            ['reg'=>'D-8999','cn'=>'21','model'=>'ASK 21',  'type'=>1,'pattern'=>'thermal','clat'=>47.752,'clng'=>12.468,'alt'=>1950,'spd'=>90, 'radius'=>0.022,'period'=>140,'phase'=>4.2],
+            ['reg'=>'D-8250','cn'=>'HF','model'=>'HPH 304', 'type'=>1,'pattern'=>'glide',  'clat'=>47.710,'clng'=>12.390,'alt'=>2200,'spd'=>140,'leg'=>0.120,'period'=>240,'phase'=>1.5],
+            ['reg'=>'D-8251','cn'=>'L4','model'=>'LS 4',    'type'=>1,'pattern'=>'thermal','clat'=>47.738,'clng'=>12.502,'alt'=>2050,'spd'=>95, 'radius'=>0.019,'period'=>130,'phase'=>2.8],
+            ['reg'=>'D-2249','cn'=>'DD','model'=>'Duo Discus','type'=>1,'pattern'=>'glide', 'clat'=>47.770,'clng'=>12.430,'alt'=>1750,'spd'=>125,'leg'=>0.090,'period'=>210,'phase'=>3.7],
+            ['reg'=>'D-1020','cn'=>'K6','model'=>'Ka 6',    'type'=>1,'pattern'=>'thermal','clat'=>47.722,'clng'=>12.443,'alt'=>1300,'spd'=>65, 'radius'=>0.014,'period'=>115,'phase'=>5.1],
+            // Tow plane doing circuits
+            ['reg'=>'D-ETOW','cn'=>'TW','model'=>'Tow Plane','type'=>2,'pattern'=>'circuit','clat'=>47.730,'clng'=>12.439,'alt'=>500,'spd'=>160,'leg'=>0.040,'period'=>75,'phase'=>0.0],
+        ];
 
         $aircraft = [];
-        while ($row = $result->fetch_assoc()) {
-            $row['altitude_m']        = (int)$row['altitude_m'];
-            $row['ground_speed_kph']  = (float)$row['ground_speed_kph'];
-            $row['track_deg']         = (int)$row['track_deg'];
-            $row['climb_rate_ms']     = (float)$row['climb_rate_ms'];
-            $row['aircraft_type']     = (int)$row['aircraft_type'];
-            $row['latitude']          = (float)$row['latitude'];
-            $row['longitude']         = (float)$row['longitude'];
-            if (($row['identified'] ?? 'Y') === 'N') {
-                $row['registration'] = null; $row['aircraft_model'] = null; $row['cn'] = null;
+        foreach ($fleet as $i => $plane) {
+            $phase = ($t / $plane['period']) + $plane['phase'];
+            $lat = $plane['clat'];
+            $lng = $plane['clng'];
+            $track = 0;
+            $climb = 0.0;
+
+            if ($plane['pattern'] === 'thermal') {
+                // Circle a thermal: smooth position + gentle altitude oscillation
+                $lat   = $plane['clat'] + $plane['radius'] * sin($phase);
+                $lng   = $plane['clng'] + ($plane['radius'] / cos(deg2rad($plane['clat']))) * cos($phase);
+                $track = fmod(rad2deg(atan2(cos($phase), -sin($phase))) + 360, 360);
+                $climb = 1.5 + 1.0 * sin($phase * 0.3);
+                $alt   = $plane['alt'] + 200 * sin($phase * 0.15);
+
+            } elseif ($plane['pattern'] === 'glide') {
+                // Back-and-forth straight glide
+                $frac  = ($phase / (2 * M_PI)) - floor($phase / (2 * M_PI)); // 0..1
+                $dir   = ($frac < 0.5) ? 1 : -1;
+                $pos   = $dir > 0 ? $frac * 2 : (1 - $frac) * 2;
+                $lat   = $plane['clat'] + ($plane['leg'] * ($pos - 0.5));
+                $lng   = $plane['clng'] + ($plane['leg'] / cos(deg2rad($plane['clat'])) * ($pos - 0.5) * 0.6);
+                $track = $dir > 0 ? 170 : 350;
+                $climb = -1.2;
+                $alt   = $plane['alt'] - 150 * ($pos - 0.5);
+
+            } else { // circuit
+                // Tight oval around the airfield
+                $lat   = $plane['clat'] + $plane['leg'] * 0.5 * sin($phase);
+                $lng   = $plane['clng'] + ($plane['leg'] / cos(deg2rad($plane['clat']))) * cos($phase);
+                $track = fmod(rad2deg(atan2(cos($phase), -sin($phase))) + 360, 360);
+                $climb = 0.0;
+                $alt   = $plane['alt'];
             }
-            $aircraft[] = $row;
+
+            $aircraft[] = [
+                'device_id'       => 'DEMO' . str_pad($i, 3, '0', STR_PAD_LEFT),
+                'latitude'        => round($lat, 6),
+                'longitude'       => round($lng, 6),
+                'altitude_m'      => (int)round($alt ?? $plane['alt']),
+                'ground_speed_kph'=> (float)$plane['spd'],
+                'track_deg'       => (int)round($track),
+                'climb_rate_ms'   => round($climb, 2),
+                'aircraft_type'   => $plane['type'],
+                'received_at'     => date('Y-m-d H:i:s'),
+                'signal_db'       => 18.5,
+                'registration'    => $plane['reg'],
+                'aircraft_model'  => $plane['model'],
+                'cn'              => $plane['cn'],
+                'tracked'         => 'Y',
+                'identified'      => 'Y',
+            ];
         }
 
         echo json_encode([
-            'aircraft'       => $aircraft,
-            'count'          => count($aircraft),
+            'aircraft'        => $aircraft,
+            'count'           => count($aircraft),
             'time_window_min' => 10,
-            'demo'           => true,
-            'replay_time'    => $virtualTo,
+            'demo'            => true,
         ]);
         break;
 
