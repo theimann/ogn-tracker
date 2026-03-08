@@ -45,16 +45,17 @@ switch ($action) {
         $t = time();
 
         // Circuit waypoints: [lat, lng, alt_m, heading_deg, leg_duration_secs]
-        // Left-hand pattern: upwind SW → crosswind SE → downwind NE → base NW → final SW → rollout
+        // Runway 06 (heading 060°/NE), left-hand pattern: circuit to the NW
+        // Upwind NE → crosswind NNW → downwind WSW → base SSE → final NE
         $wpts = [
-            [47.7340, 12.4450, 608, 220, 45], // 0: Runway 22 threshold (NE), liftoff heading SW
-            [47.7255, 12.4330, 750, 220, 28], // 1: End of upwind (SW end of runway)
-            [47.7188, 12.4430, 840, 130, 28], // 2: End of crosswind (SE corner)
-            [47.7250, 12.4565, 850,  40, 30], // 3: Mid downwind (SE of field, heading NE)
-            [47.7340, 12.4640, 845,  40, 30], // 4: End of downwind (NE corner, abeam threshold)
-            [47.7395, 12.4520, 790, 310, 28], // 5: End of base (heading NW)
-            [47.7370, 12.4430, 690, 220, 35], // 6: Final approach
-            [47.7340, 12.4450, 610, 220, 10], // 7: Touchdown / loop back to 0
+            [47.7260, 12.4325, 608,  60, 40], // 0: Runway 06 threshold (SW end), liftoff heading NE
+            [47.7340, 12.4480, 740,  60, 25], // 1: End of upwind (past NE end, still climbing)
+            [47.7390, 12.4420, 845, 330, 25], // 2: End of crosswind (N of field)
+            [47.7355, 12.4225, 850, 240, 32], // 3: Mid downwind (NW of field, heading WSW)
+            [47.7270, 12.4070, 845, 240, 28], // 4: End of downwind
+            [47.7215, 12.4150, 790, 150, 25], // 5: End of base (heading SSE)
+            [47.7245, 12.4290, 680,  60, 32], // 6: Final approach
+            [47.7260, 12.4325, 612,  60, 10], // 7: Touchdown / loop back to 0
         ];
 
         // Cumulative time offsets
@@ -90,7 +91,7 @@ switch ($action) {
 
             // Find which leg
             $leg = 0;
-            for ($j = 0; $j < count($wpts) - 1; $j++) {
+            for ($j = 0; $j < count($wpts); $j++) {
                 if ($pos >= $cum[$j] && $pos < $cum[$j + 1]) { $leg = $j; break; }
             }
             $w0 = $wpts[$leg];
