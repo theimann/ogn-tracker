@@ -988,15 +988,16 @@ function toggleTimeline() {
     <input type="range" class="timeline-slider" id="tl-slider" min="0" max="86400" value="0" step="30" oninput="tlScrub(this.value)">
     <span class="timeline-time" id="tl-now">--:--</span>
     <select class="tl-speed" id="tl-speed" title="Playback speed">
-      <option value="30">1×</option>
-      <option value="150">5×</option>
-      <option value="300" selected>10×</option>
-      <option value="900">30×</option>
-      <option value="1800">60×</option>
+      <option value="1" selected>1× real</option>
+      <option value="10">10×</option>
+      <option value="30">30×</option>
+      <option value="120">2 min/s</option>
+      <option value="300">5 min/s</option>
+      <option value="600">10 min/s</option>
     </select>
     <button class="tl-btn active" id="tl-live-btn" onclick="tlGoLive()">● Live</button>
   </div>
-  <div class="tl-label" id="tl-label">Drag to rewind · Playback speed: seconds of flight time per real second</div>
+  <div class="tl-label" id="tl-label">Drag to rewind · 1× = real time speed</div>
 </div>
 </body>
 </html>
