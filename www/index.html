@@ -167,6 +167,7 @@
     <button class="control-btn active" id="btn-live" onclick="toggleLive()">● Live</button>
     <button class="control-btn" id="btn-heatmap" onclick="toggleHeatmap()">🔥 Heatmap</button>
     <button class="control-btn" id="btn-stats" onclick="toggleStats()">📊 Stats</button>
+    <button class="control-btn" id="btn-melex" onclick="toggleMelexOverlay()" title="Toggle Melex map overlay">🗺 Melex</button>
 </div>
 
 <div class="info-panel" id="info-panel">
@@ -192,6 +193,187 @@ const API = 'api.php';
 const DEMO_MODE = new URLSearchParams(window.location.search).has('demo');
 const AIRCRAFT_TYPES = { 1: 'Glider', 2: 'Tow Plane' };
 const TYPE_COLORS = { 1: '#3b82f6', 2: '#f59e0b' };
+
+// ===== MELEX MAP OVERLAY =====
+// Renders the Unterwössen OSM tilemap (Melex art style) as a Google Maps OverlayView.
+
+let melexOverlay = null;
+
+const LAYER_ORDER = ['meadow','park','forest','apron','taxiway','runway','track','road_minor','road_main','water','building'];
+const TILE_MAP = {
+    meadow:     { tile: 'grass_light',    alpha: 1.0 },
+    park:       { tile: 'grass_dark',     alpha: 1.0 },
+    forest:     { tile: 'forest_canopy',  alpha: 1.0 },
+    water:      { tile: null,             alpha: 1.0, stroke: '#336699', lineW: 2 },
+    apron:      { tile: 'apron_concrete', alpha: 1.0 },
+    runway:     { tile: 'runway_center',  alpha: 1.0 },
+    taxiway:    { tile: 'taxiway',        alpha: 1.0 },
+    road_main:  { tile: null,             stroke: '#c8aa66', lineW: 4 },
+    road_minor: { tile: null,             stroke: '#b09955', lineW: 2.5 },
+    track:      { tile: null,             stroke: '#9a8855', lineW: 1.5, dash: [4,4] },
+    building:   { tile: 'roof_red',       alpha: 0.65, stroke: '#775533', lineW: 0.5 },
+};
+
+function classifyWay(tags) {
+    const lu = tags.landuse, nat = tags.natural, aero = tags.aeroway,
+          hw = tags.highway, ww = tags.waterway, bld = tags.building, lei = tags.leisure;
+    if (nat === 'water' || ww === 'river' || ww === 'stream') return 'water';
+    if (nat === 'wood' || nat === 'scrub' || lu === 'forest')  return 'forest';
+    if (lu === 'meadow' || lu === 'grass' || lu === 'farmland' || lu === 'farmyard') return 'meadow';
+    if (lei === 'pitch' || lei === 'park') return 'park';
+    if (aero === 'aerodrome' || aero === 'apron') return 'apron';
+    if (aero === 'runway')  return 'runway';
+    if (aero === 'taxiway') return 'taxiway';
+    if (hw === 'primary' || hw === 'secondary') return 'road_main';
+    if (hw === 'residential') return 'road_minor';
+    if (hw === 'track' || hw === 'path') return 'track';
+    if (bld) return 'building';
+    return null;
+}
+
+class MelexOverlay extends google.maps.OverlayView {
+    constructor() {
+        super();
+        this.canvas = null;
+        this.ways = null;      // [{type, latLngs}]
+        this.textures = {};   // name → HTMLImageElement
+        this.patterns = {};   // name → CanvasPattern (built lazily)
+        this.visible = false;
+        this.opacity = 0.88;
+    }
+
+    onAdd() {
+        this.canvas = document.createElement('canvas');
+        this.canvas.style.position = 'absolute';
+        this.canvas.style.pointerEvents = 'none';
+        this.getPanes().overlayLayer.appendChild(this.canvas);
+        this._load();
+    }
+
+    async _load() {
+        // Load OSM data
+        const r = await fetch('tiles/unterwossen.json');
+        const osm = await r.json();
+        const nodes = {};
+        for (const el of osm.elements)
+            if (el.type === 'node') nodes[el.id] = new google.maps.LatLng(el.lat, el.lon);
+        const layered = {};
+        for (const t of LAYER_ORDER) layered[t] = [];
+        for (const el of osm.elements) {
+            if (el.type !== 'way' || !el.nodes) continue;
+            const type = classifyWay(el.tags || {});
+            if (!type) continue;
+            const latLngs = el.nodes.map(id => nodes[id]).filter(Boolean);
+            if (latLngs.length) layered[type].push(latLngs);
+        }
+        this.ways = layered;
+
+        // Load tile textures
+        const names = [...new Set(Object.values(TILE_MAP).map(t => t.tile).filter(Boolean))];
+        await Promise.all(names.map(name => new Promise(res => {
+            const img = new Image();
+            img.onload = img.onerror = res;
+            img.src = `tiles/slices/${name}.png`;
+            this.textures[name] = img;
+        })));
+
+        this.draw();
+    }
+
+    draw() {
+        if (!this.ways || !this.visible) return;
+        const proj = this.getProjection();
+        const mapBounds = this.getMap().getBounds();
+        if (!mapBounds) return;
+
+        // Canvas covers the full visible map area with some padding
+        const ne = proj.fromLatLngToDivPixel(mapBounds.getNorthEast());
+        const sw = proj.fromLatLngToDivPixel(mapBounds.getSouthWest());
+        const pad = 64;
+        const left = sw.x - pad, top = ne.y - pad;
+        const w = (ne.x - sw.x) + pad * 2;
+        const h = (sw.y - ne.y) + pad * 2;
+
+        this.canvas.style.left = left + 'px';
+        this.canvas.style.top  = top  + 'px';
+        this.canvas.width  = w;
+        this.canvas.height = h;
+
+        const ctx = this.canvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        ctx.globalAlpha = this.opacity;
+
+        // Helper: convert LatLng → canvas pixel
+        const toXY = ll => {
+            const p = proj.fromLatLngToDivPixel(ll);
+            return [p.x - left, p.y - top];
+        };
+
+        // Rebuild patterns if needed (ctx changes on resize)
+        this.patterns = {};
+        for (const [name, img] of Object.entries(this.textures)) {
+            if (img.complete && img.naturalWidth) {
+                this.patterns[name] = ctx.createPattern(img, 'repeat');
+            }
+        }
+
+        // Draw each layer
+        for (const type of LAYER_ORDER) {
+            const ways = this.ways[type];
+            if (!ways || !ways.length) continue;
+            const tm = TILE_MAP[type];
+            const pat = tm.tile ? this.patterns[tm.tile] : null;
+
+            for (const latLngs of ways) {
+                const pts = latLngs.map(toXY);
+                if (pts.length < 2) continue;
+
+                ctx.beginPath();
+                ctx.moveTo(pts[0][0], pts[0][1]);
+                for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+
+                if (pat) {
+                    ctx.closePath();
+                    ctx.globalAlpha = this.opacity * (tm.alpha ?? 1);
+                    ctx.fillStyle = pat;
+                    ctx.fill();
+                    if (tm.stroke) {
+                        ctx.strokeStyle = tm.stroke;
+                        ctx.lineWidth = tm.lineW ?? 1;
+                        ctx.stroke();
+                    }
+                } else if (tm.stroke) {
+                    ctx.globalAlpha = this.opacity;
+                    ctx.strokeStyle = tm.stroke;
+                    ctx.lineWidth = tm.lineW ?? 1;
+                    if (tm.dash) ctx.setLineDash(tm.dash);
+                    ctx.stroke();
+                    if (tm.dash) ctx.setLineDash([]);
+                }
+                ctx.globalAlpha = this.opacity;
+            }
+        }
+    }
+
+    onRemove() {
+        if (this.canvas) { this.canvas.parentNode?.removeChild(this.canvas); this.canvas = null; }
+    }
+
+    setVisible(v) {
+        this.visible = v;
+        if (this.canvas) this.canvas.style.display = v ? '' : 'none';
+        if (v) this.draw();
+    }
+}
+
+function toggleMelexOverlay() {
+    if (!melexOverlay) {
+        melexOverlay = new MelexOverlay();
+        melexOverlay.setMap(map);
+    }
+    melexOverlay.setVisible(!melexOverlay.visible);
+    document.getElementById('btn-melex').classList.toggle('active', melexOverlay.visible);
+}
 
 async function initMap() {
     document.getElementById('loading').style.display = 'none';
