@@ -453,19 +453,37 @@ function buildSpriteIcon(registration, trackDeg) {
   const entry = SPRITE_FLEET[registration];
   if (!entry) return null;
   const size = 96;
+
+  // Render sprite on an offscreen canvas first
+  const off = document.createElement('canvas');
+  off.width = size; off.height = size;
+  const offCtx = off.getContext('2d');
+  const rot = ((trackDeg || 0) - 180) * Math.PI / 180;
+  offCtx.translate(size / 2, size / 2);
+  offCtx.rotate(rot);
+  offCtx.scale(1.1, 1.1);
+  offCtx.translate(-32, -23);
+  entry.draw(offCtx, false, entry.colors);
+
+  // Composite onto final canvas with white halo + dark drop shadow
   const canvas = document.createElement('canvas');
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
-  const rot = ((trackDeg || 0) - 180) * Math.PI / 180;
-  ctx.translate(size / 2, size / 2);
-  ctx.rotate(rot);
-  ctx.scale(1.1, 1.1);
-  ctx.translate(-32, -23); // center of aircraft draw-space
-  entry.draw(ctx, false, entry.colors);
+
+  // Pass 1: white glow
+  ctx.filter = 'drop-shadow(0px 0px 3px white) drop-shadow(0px 0px 5px white)';
+  ctx.drawImage(off, 0, 0);
+
+  // Pass 2: dark drop shadow for depth
+  ctx.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.85))';
+  ctx.drawImage(off, 0, 0);
+
+  ctx.filter = 'none';
+
   return {
     url: canvas.toDataURL('image/png'),
-    scaledSize: new google.maps.Size(48, 48),
-    anchor: new google.maps.Point(24, 24),
+    scaledSize: new google.maps.Size(56, 56),
+    anchor: new google.maps.Point(28, 28),
   };
 }
 
