@@ -505,7 +505,8 @@ function updateMarkers(aircraft) {
     aircraft.forEach(ac => {
         activeIds.add(ac.device_id);
         const title = ac.registration ? `${ac.registration}${ac.aircraft_model ? ' (' + ac.aircraft_model + ')' : ''}` : ac.device_id;
-        const label = ac.cn ? { text: ac.cn, color: '#fff', fontSize: '10px', fontWeight: '700' } : undefined;
+        const hasSprite = ac.registration && (ac.registration in SPRITE_FLEET);
+        const label = (!hasSprite && ac.cn) ? { text: ac.cn, color: '#fff', fontSize: '10px', fontWeight: '700' } : undefined;
 
         if (markers[ac.device_id]) {
             const m = markers[ac.device_id];
