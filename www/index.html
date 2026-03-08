@@ -115,6 +115,83 @@
         .search-box input:focus { border-color: var(--accent); }
         .search-box input::placeholder { color: var(--text-dim); }
 
+        /* ── Timeline ── */
+        .timeline-bar {
+            display: none;
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: rgba(15,20,30,0.92);
+            backdrop-filter: blur(8px);
+            border-top: 1px solid rgba(255,255,255,0.08);
+            padding: 10px 16px 12px;
+            z-index: 200;
+            user-select: none;
+        }
+        .timeline-bar.visible { display: block; }
+        .timeline-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .timeline-time {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent);
+            min-width: 42px;
+            font-variant-numeric: tabular-nums;
+        }
+        .timeline-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.15);
+            outline: none;
+            cursor: pointer;
+        }
+        .timeline-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            box-shadow: 0 0 6px rgba(59,130,246,0.7);
+        }
+        .timeline-slider::-moz-range-thumb {
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            border: none;
+            cursor: pointer;
+        }
+        .tl-btn {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            color: var(--text);
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .tl-btn:hover { border-color: var(--accent); }
+        .tl-btn.active { background: var(--accent); border-color: var(--accent); }
+        .tl-speed {
+            font-size: 12px;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .tl-speed:hover { border-color: var(--accent); color: var(--text); }
+        .tl-label {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-align: center;
+            margin-top: 5px;
+        }
+
         @media (max-width: 600px) {
             .stats-bar { display: none; }
             .search-box { display: none; }
@@ -167,6 +244,7 @@
     <button class="control-btn active" id="btn-live" onclick="toggleLive()">● Live</button>
     <button class="control-btn" id="btn-heatmap" onclick="toggleHeatmap()">🔥 Heatmap</button>
     <button class="control-btn" id="btn-stats" onclick="toggleStats()">📊 Stats</button>
+    <button class="control-btn" id="btn-rewind" onclick="toggleTimeline()">⏪ Rewind</button>
 
 </div>
 
@@ -770,10 +848,157 @@ async function doSearch(e) {
     const resp = await fetch(`${API}?action=config`, {credentials: 'same-origin'});
     const config = await resp.json();
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=visualization`;
+    <!-- Timeline bar -->
+<div class="timeline-bar" id="timeline-bar">
+  <div class="timeline-row">
+    <button class="tl-btn" id="tl-playpause" onclick="tlPlayPause()">▶ Play</button>
+    <span class="timeline-time" id="tl-time">00:00</span>
+    <input type="range" class="timeline-slider" id="tl-slider" min="0" max="86400" value="0" step="30" oninput="tlScrub(this.value)">
+    <span class="timeline-time" id="tl-now">--:--</span>
+    <select class="tl-speed" id="tl-speed" title="Playback speed">
+      <option value="30">1×</option>
+      <option value="150">5×</option>
+      <option value="300" selected>10×</option>
+      <option value="900">30×</option>
+      <option value="1800">60×</option>
+    </select>
+    <button class="tl-btn active" id="tl-live-btn" onclick="tlGoLive()">● Live</button>
+  </div>
+  <div class="tl-label" id="tl-label">Drag to rewind · Playback speed: seconds of flight time per real second</div>
+</div>
+
+<script>
+script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=visualization`;
     script.async = true;
     document.head.appendChild(script);
 })();
+</script>
+
+<script>
+// ===== TIMELINE / REWIND =====
+let tlPlaying = false;
+let tlInterval = null;
+let tlCurrentTs = 0;  // unix timestamp currently shown
+let tlDayStart = 0;   // midnight today (unix)
+let tlDayEnd = 0;     // now (unix)
+
+function tlInit() {
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    tlDayStart = Math.floor(midnight.getTime() / 1000);
+    tlDayEnd   = Math.floor(now.getTime() / 1000);
+    tlCurrentTs = tlDayEnd;
+
+    const slider = document.getElementById('tl-slider');
+    slider.min   = 0;
+    slider.max   = tlDayEnd - tlDayStart;
+    slider.value = slider.max;
+
+    document.getElementById('tl-now').textContent = tlFmtTime(tlDayEnd);
+    document.getElementById('tl-time').textContent = tlFmtTime(tlDayEnd);
+}
+
+function tlFmtTime(ts) {
+    const d = new Date(ts * 1000);
+    return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+}
+
+function tlScrub(offsetSecs) {
+    tlCurrentTs = tlDayStart + parseInt(offsetSecs);
+    document.getElementById('tl-time').textContent = tlFmtTime(tlCurrentTs);
+    // Mark as not-live
+    const isLive = tlCurrentTs >= tlDayEnd - 60;
+    document.getElementById('tl-live-btn').classList.toggle('active', isLive);
+    if (!isLive) {
+        tlFetchSnapshot(tlCurrentTs);
+    }
+}
+
+async function tlFetchSnapshot(ts) {
+    try {
+        const r = await fetch(`api.php?action=snapshot&ts=${ts}`);
+        const data = await r.json();
+        updateMarkers(data.aircraft);
+        document.getElementById('tl-label').textContent =
+            `Snapshot: ${tlFmtTime(ts)} · ${data.count} aircraft`;
+    } catch(e) {
+        console.error('Snapshot fetch failed', e);
+    }
+}
+
+function tlPlayPause() {
+    tlPlaying = !tlPlaying;
+    document.getElementById('tl-playpause').textContent = tlPlaying ? '⏸ Pause' : '▶ Play';
+    if (tlPlaying) {
+        tlStartPlayback();
+    } else {
+        clearInterval(tlInterval);
+        tlInterval = null;
+    }
+}
+
+function tlStartPlayback() {
+    if (tlInterval) clearInterval(tlInterval);
+    // If at end, start from midnight
+    if (tlCurrentTs >= tlDayEnd - 60) {
+        tlCurrentTs = tlDayStart;
+        document.getElementById('tl-slider').value = 0;
+    }
+    tlInterval = setInterval(() => {
+        const speed = parseInt(document.getElementById('tl-speed').value);
+        tlCurrentTs += speed;
+        // Update slider
+        const offset = tlCurrentTs - tlDayStart;
+        document.getElementById('tl-slider').value = offset;
+        document.getElementById('tl-time').textContent = tlFmtTime(tlCurrentTs);
+        document.getElementById('tl-live-btn').classList.remove('active');
+
+        if (tlCurrentTs >= tlDayEnd) {
+            tlCurrentTs = tlDayEnd;
+            tlPlaying = false;
+            clearInterval(tlInterval);
+            tlInterval = null;
+            document.getElementById('tl-playpause').textContent = '▶ Play';
+            document.getElementById('tl-label').textContent = 'Reached end of day';
+            return;
+        }
+        tlFetchSnapshot(tlCurrentTs);
+    }, 1000); // tick every real second
+}
+
+function tlGoLive() {
+    // Stop playback
+    if (tlInterval) { clearInterval(tlInterval); tlInterval = null; }
+    tlPlaying = false;
+    document.getElementById('tl-playpause').textContent = '▶ Play';
+
+    // Snap slider to now
+    tlCurrentTs = tlDayEnd;
+    const slider = document.getElementById('tl-slider');
+    slider.max = tlDayEnd - tlDayStart;
+    slider.value = slider.max;
+    document.getElementById('tl-time').textContent = tlFmtTime(tlDayEnd);
+    document.getElementById('tl-live-btn').classList.add('active');
+    document.getElementById('tl-label').textContent = 'Live mode';
+
+    // Resume live polling
+    if (!isLive) toggleLive(); // turn live back on if it was off
+    fetchLive();
+}
+
+function toggleTimeline() {
+    const bar = document.getElementById('timeline-bar');
+    const visible = bar.classList.toggle('visible');
+    document.getElementById('btn-rewind').classList.toggle('active', visible);
+    if (visible) {
+        tlInit();
+        // Pause live updates while timeline is active
+        if (isLive) toggleLive();
+    } else {
+        // Resume live on close
+        if (!isLive) toggleLive();
+    }
+}
 </script>
 </body>
 </html>

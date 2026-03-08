@@ -186,7 +186,44 @@ switch ($action) {
         ]);
         break;
 
-    // Track for a specific device
+    // Snapshot: all aircraft state at a given unix timestamp
+    case 'snapshot':
+        $ts = intval($_GET['ts'] ?? time());
+        $window = 120; // look back up to 2 min for last known position
+        $tsFrom = $ts - $window;
+        $result = $db->query("
+            SELECT p.device_id, p.latitude, p.longitude, p.altitude_m,
+                   p.ground_speed_kph, p.track_deg, p.climb_rate_ms,
+                   p.aircraft_type, p.received_at, p.signal_db,
+                   d.registration, d.aircraft_model, d.cn, d.tracked, d.identified
+            FROM ogn_positions p
+            INNER JOIN (
+                SELECT device_id, MAX(received_at) as max_received
+                FROM ogn_positions
+                WHERE received_at BETWEEN FROM_UNIXTIME({$tsFrom}) AND FROM_UNIXTIME({$ts})
+                GROUP BY device_id
+            ) latest ON p.device_id = latest.device_id AND p.received_at = latest.max_received
+            LEFT JOIN ogn_ddb d ON p.device_id = d.device_id
+            ORDER BY p.received_at DESC
+        ");
+        $aircraft = [];
+        while ($row = $result->fetch_assoc()) {
+            $row['altitude_m']       = (int)$row['altitude_m'];
+            $row['ground_speed_kph'] = (float)$row['ground_speed_kph'];
+            $row['track_deg']        = (int)$row['track_deg'];
+            $row['climb_rate_ms']    = (float)$row['climb_rate_ms'];
+            $row['aircraft_type']    = (int)$row['aircraft_type'];
+            $row['latitude']         = (float)$row['latitude'];
+            $row['longitude']        = (float)$row['longitude'];
+            if (($row['identified'] ?? 'Y') === 'N') {
+                $row['registration'] = null; $row['aircraft_model'] = null; $row['cn'] = null;
+            }
+            $aircraft[] = $row;
+        }
+        echo json_encode(['aircraft' => $aircraft, 'count' => count($aircraft), 'snapshot_ts' => $ts]);
+        break;
+
+// Track for a specific device
     case 'track':
         $deviceId = $db->real_escape_string($_GET['device_id'] ?? '');
         $hours = intval($_GET['hours'] ?? 24);
