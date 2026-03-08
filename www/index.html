@@ -864,9 +864,10 @@ let tlDayEnd = 0;     // now (unix)
 
 function tlInit() {
     const now = new Date();
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-    tlDayStart = Math.floor(midnight.getTime() / 1000);
-    tlDayEnd   = Math.floor(now.getTime() / 1000);
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7, 0, 0);
+    const dayEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0);
+    tlDayStart = Math.floor(dayStart.getTime() / 1000);
+    tlDayEnd   = Math.min(Math.floor(now.getTime() / 1000), Math.floor(dayEnd.getTime() / 1000));
     tlCurrentTs = tlDayEnd;
 
     const slider = document.getElementById('tl-slider');
