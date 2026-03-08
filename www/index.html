@@ -198,6 +198,7 @@ const TYPE_COLORS = { 1: '#3b82f6', 2: '#f59e0b' };
 // Renders the Unterwössen OSM tilemap (Melex art style) as a Google Maps OverlayView.
 
 let melexOverlay = null;
+let MelexOverlay = null; // defined inside initMap() once google is loaded
 
 const LAYER_ORDER = ['meadow','park','forest','apron','taxiway','runway','track','road_minor','road_main','water','building'];
 const TILE_MAP = {
@@ -231,7 +232,7 @@ function classifyWay(tags) {
     return null;
 }
 
-class MelexOverlay extends google.maps.OverlayView {
+function defineMelexOverlay() { MelexOverlay = class extends google.maps.OverlayView {
     constructor() {
         super();
         this.canvas = null;
@@ -364,7 +365,7 @@ class MelexOverlay extends google.maps.OverlayView {
         if (this.canvas) this.canvas.style.display = v ? '' : 'none';
         if (v) this.draw();
     }
-}
+}; } // end defineMelexOverlay()
 
 function toggleMelexOverlay() {
     if (!melexOverlay) {
@@ -376,6 +377,7 @@ function toggleMelexOverlay() {
 }
 
 async function initMap() {
+    defineMelexOverlay(); // needs google.maps to be loaded first
     document.getElementById('loading').style.display = 'none';
     if (DEMO_MODE) {
         document.getElementById('demo-badge').style.display = '';
