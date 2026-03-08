@@ -39,6 +39,55 @@ $action = $_GET['action'] ?? 'live';
 
 switch ($action) {
 
+    // Demo/replay mode — replays peak March 7 data, cycling every 30 min
+    // Identical response shape to 'live' so the frontend works unchanged
+    case 'demo':
+        $cycleSeconds = 1800; // 30-minute replay cycle
+        $replayStart  = strtotime('2026-03-07 12:00:00 UTC');
+        $virtualNow   = $replayStart + (time() % $cycleSeconds);
+        $virtualFrom  = date('Y-m-d H:i:s', $virtualNow - 600); // 10-min window
+        $virtualTo    = date('Y-m-d H:i:s', $virtualNow);
+
+        $result = $db->query("
+            SELECT p.device_id, p.latitude, p.longitude, p.altitude_m,
+                   p.ground_speed_kph, p.track_deg, p.climb_rate_ms,
+                   p.aircraft_type, p.received_at, p.signal_db,
+                   d.registration, d.aircraft_model, d.cn, d.tracked, d.identified
+            FROM ogn_positions p
+            INNER JOIN (
+                SELECT device_id, MAX(received_at) as max_received
+                FROM ogn_positions
+                WHERE received_at BETWEEN '$virtualFrom' AND '$virtualTo'
+                GROUP BY device_id
+            ) latest ON p.device_id = latest.device_id AND p.received_at = latest.max_received
+            LEFT JOIN ogn_ddb d ON p.device_id = d.device_id
+            ORDER BY p.received_at DESC
+        ");
+
+        $aircraft = [];
+        while ($row = $result->fetch_assoc()) {
+            $row['altitude_m']        = (int)$row['altitude_m'];
+            $row['ground_speed_kph']  = (float)$row['ground_speed_kph'];
+            $row['track_deg']         = (int)$row['track_deg'];
+            $row['climb_rate_ms']     = (float)$row['climb_rate_ms'];
+            $row['aircraft_type']     = (int)$row['aircraft_type'];
+            $row['latitude']          = (float)$row['latitude'];
+            $row['longitude']         = (float)$row['longitude'];
+            if (($row['identified'] ?? 'Y') === 'N') {
+                $row['registration'] = null; $row['aircraft_model'] = null; $row['cn'] = null;
+            }
+            $aircraft[] = $row;
+        }
+
+        echo json_encode([
+            'aircraft'       => $aircraft,
+            'count'          => count($aircraft),
+            'time_window_min' => 10,
+            'demo'           => true,
+            'replay_time'    => $virtualTo,
+        ]);
+        break;
+
     // Current positions (last 10 minutes, latest per device), enriched with DDB
     case 'live':
         $minutes = intval($_GET['minutes'] ?? 10);

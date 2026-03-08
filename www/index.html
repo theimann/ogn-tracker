@@ -129,7 +129,10 @@
         <svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
         OGN Tracker
     </a>
-    <div class="stats-bar">
+    <div class="stats-bar" id="stats-bar">
+        <div class="stat" id="demo-badge" style="display:none">
+            <span style="background:#f59e0b;color:#000;font-size:0.7rem;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">DEMO</span>
+        </div>
         <div class="stat">
             <div class="stat-dot live"></div>
             <span class="stat-value" id="stat-active">—</span>
@@ -186,15 +189,21 @@
 let map, markers = {}, trackLine = null, heatmapLayer = null;
 let liveInterval = null, isLive = true, isHeatmap = false;
 const API = 'api.php';
+const DEMO_MODE = new URLSearchParams(window.location.search).has('demo');
 const AIRCRAFT_TYPES = { 1: 'Glider', 2: 'Tow Plane' };
 const TYPE_COLORS = { 1: '#3b82f6', 2: '#f59e0b' };
 
 async function initMap() {
     document.getElementById('loading').style.display = 'none';
+    if (DEMO_MODE) {
+        document.getElementById('demo-badge').style.display = '';
+        document.querySelector('.stat-dot.live').style.animation = 'none';
+        document.querySelector('.stat-dot.live').style.background = 'var(--orange)';
+    }
 
     map = new google.maps.Map(document.getElementById('map'), {
         center: { lat: 47.730397918870935, lng: 12.439012742234423 }, // Unterwoessen airfield
-        zoom: 15,
+        zoom: 17,
         mapTypeId: 'hybrid',
         styles: [
             { elementType: 'geometry', stylers: [{ color: '#1a1a2e' }] },
@@ -217,10 +226,255 @@ async function initMap() {
     loadStats();
 }
 
-function createGliderIcon(track, type) {
+// ===== MELEX SPRITE DRAW FUNCTIONS =====
+function drawASK13(ctx, airbrakes, colors) {
+  colors = colors || {};
+  const tip = colors.tip || '#2255bb';
+  const stripe = colors.stripe || 'rgba(140,130,120,0.1)';
+  const tipInner = colors.tipInner || 10;
+  const y1 = 20, y2 = 28, ym = 24;
+  const tOff = 1;
+  ctx.fillStyle='#f0f0f0';
+  ctx.beginPath();
+  ctx.moveTo(24,y1); ctx.lineTo(6,y1+1);
+  ctx.quadraticCurveTo(2,ym+tOff/2, 6,y2-1+tOff);
+  ctx.lineTo(24,y2); ctx.lineTo(40,y2); ctx.lineTo(58,y2-1+tOff);
+  ctx.quadraticCurveTo(62,ym+tOff/2, 58,y1+1);
+  ctx.lineTo(40,y1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#ffffff';
+  ctx.beginPath(); ctx.moveTo(8,y1+1); ctx.lineTo(56,y1+1); ctx.lineTo(54,ym); ctx.lineTo(10,ym); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#d8d8d8';
+  ctx.beginPath(); ctx.moveTo(10,ym+1); ctx.lineTo(54,ym+1); ctx.lineTo(58,y2-1+tOff); ctx.lineTo(6,y2-1+tOff); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=stripe; ctx.fillRect(20,ym,24,2);
+  ctx.fillStyle=tip;
+  ctx.beginPath(); ctx.moveTo(tipInner,y1+1); ctx.lineTo(6,y1+1); ctx.quadraticCurveTo(2,ym+tOff/2,6,y2-1+tOff); ctx.lineTo(tipInner,y2-1+tOff); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(64-tipInner,y1+1); ctx.lineTo(58,y1+1); ctx.quadraticCurveTo(62,ym+tOff/2,58,y2-1+tOff); ctx.lineTo(64-tipInner,y2-1+tOff); ctx.closePath(); ctx.fill();
+  ctx.save(); ctx.translate(32,22); ctx.scale(1,0.85); ctx.translate(-32,-22);
+  ctx.fillStyle='#e8e8e8';
+  ctx.beginPath(); ctx.moveTo(30,2); ctx.lineTo(34,2); ctx.lineTo(36,14); ctx.lineTo(36,39); ctx.quadraticCurveTo(36,43,32,43); ctx.quadraticCurveTo(28,43,28,39); ctx.lineTo(28,14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#f4f4f4';
+  ctx.beginPath(); ctx.moveTo(30,3); ctx.lineTo(32,3); ctx.lineTo(32,14); ctx.lineTo(32,40); ctx.lineTo(28,40); ctx.lineTo(28,14); ctx.closePath(); ctx.fill();
+  if(colors.nose) { ctx.fillStyle=colors.nose; ctx.beginPath(); ctx.moveTo(28,37); ctx.quadraticCurveTo(28,43,32,44); ctx.quadraticCurveTo(36,43,36,37); ctx.closePath(); ctx.fill(); }
+  else { ctx.fillStyle='rgba(0,0,0,0.06)'; ctx.beginPath(); ctx.moveTo(29,39); ctx.quadraticCurveTo(29,43,32,43); ctx.lineTo(36,39); ctx.closePath(); ctx.fill(); }
+  ctx.fillStyle='rgba(0,0,0,0.04)'; ctx.beginPath(); ctx.moveTo(30,37); ctx.quadraticCurveTo(30,41,32,41); ctx.lineTo(34,37); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#4488cc'; ctx.beginPath(); ctx.roundRect(29,23,6,16,3); ctx.fill();
+  ctx.fillStyle='#66aaee'; ctx.fillRect(29,24,3,12);
+  ctx.fillStyle='rgba(140,140,140,0.25)'; ctx.fillRect(10,y1,8,2); ctx.fillRect(46,y1,8,2);
+  ctx.fillStyle='rgba(140,140,140,0.10)'; ctx.fillRect(10,y1-1,8,1); ctx.fillRect(46,y1-1,8,1);
+  ctx.fillStyle='#e0e0e0'; ctx.beginPath(); ctx.roundRect(23,2,18,4,1); ctx.fill();
+  ctx.fillStyle='#f0f0f0'; ctx.fillRect(24,2,16,2);
+  ctx.fillStyle='#d4d4d4'; ctx.beginPath(); ctx.moveTo(31.2,0); ctx.lineTo(32.8,0); ctx.lineTo(33.2,9); ctx.lineTo(30.8,9); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='e4e4e4'; ctx.beginPath(); ctx.moveTo(31.2,0); ctx.lineTo(32,0); ctx.lineTo(32,9); ctx.lineTo(30.8,9); ctx.closePath(); ctx.fill();
+  if(airbrakes){ ctx.fillStyle='rgba(204,34,0,0.7)'; ctx.beginPath(); ctx.roundRect(12,24,7,2,0.5); ctx.fill(); ctx.beginPath(); ctx.roundRect(45,24,7,2,0.5); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawK8(ctx, airbrakes, colors) {
+  colors = colors || {};
+  const base=colors.base||'#d4bc8a', baseLight=colors.baseLight||'#e0cc9a', baseDark=colors.baseDark||'#c0a878';
+  const tip=colors.tip||'#8b6914', fuse=colors.fuse||'#c8a868', fuseLight=colors.fuseLight||'#d4bc8a';
+  const tail=colors.tail||'#c0a060', tailLight=colors.tailLight||'#d4bc8a', lineColor=colors.lineColor||'rgba(139,105,20,0.15)';
+  const y1=20, y2=28, ym=24, tOff=1;
+  ctx.save(); ctx.translate(32,22); ctx.scale(0.85,0.85); ctx.translate(-32,-22);
+  ctx.fillStyle=base;
+  ctx.beginPath();
+  ctx.moveTo(24,y1); ctx.lineTo(6,y1+1);
+  ctx.quadraticCurveTo(2,ym+tOff/2, 6,y2-1+tOff);
+  ctx.lineTo(24,y2); ctx.lineTo(40,y2); ctx.lineTo(58,y2-1+tOff);
+  ctx.quadraticCurveTo(62,ym+tOff/2, 58,y1+1);
+  ctx.lineTo(40,y1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=baseLight;
+  ctx.beginPath(); ctx.moveTo(8,y1+1); ctx.lineTo(56,y1+1); ctx.lineTo(54,ym); ctx.lineTo(10,ym); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=baseDark;
+  ctx.beginPath(); ctx.moveTo(10,ym+1); ctx.lineTo(54,ym+1); ctx.lineTo(58,y2-1+tOff); ctx.lineTo(6,y2-1+tOff); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle=lineColor; ctx.lineWidth=0.5;
+  for(let y=21;y<28;y+=2){ctx.beginPath();ctx.moveTo(10,y);ctx.lineTo(54,y);ctx.stroke();}
+  if(colors.stripe){ ctx.fillStyle=colors.stripe; ctx.fillRect(6,22,52,2); }
+  if(colors.stripe2){ ctx.fillStyle=colors.stripe2; ctx.fillRect(6,25,52,2); }
+  ctx.fillStyle=tip;
+  ctx.beginPath(); ctx.moveTo(10,y1+1); ctx.lineTo(6,y1+1); ctx.quadraticCurveTo(2,ym+tOff/2,6,y2-1+tOff); ctx.lineTo(10,y2-1+tOff); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(54,y1+1); ctx.lineTo(58,y1+1); ctx.quadraticCurveTo(62,ym+tOff/2,58,y2-1+tOff); ctx.lineTo(54,y2-1+tOff); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=fuse;
+  if(colors.bluntNose) {
+    ctx.beginPath(); ctx.moveTo(31,2); ctx.lineTo(33,2); ctx.lineTo(35,14); ctx.lineTo(35,36); ctx.quadraticCurveTo(35,42,32,42); ctx.quadraticCurveTo(29,42,29,36); ctx.lineTo(29,14); ctx.lineTo(31,2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=fuseLight;
+    ctx.beginPath(); ctx.moveTo(31,3); ctx.lineTo(32,3); ctx.lineTo(32,40); ctx.lineTo(29,36); ctx.lineTo(29,14); ctx.lineTo(31,3); ctx.closePath(); ctx.fill();
+    if(colors.nose) { ctx.fillStyle=colors.nose; ctx.beginPath(); ctx.moveTo(29,36); ctx.quadraticCurveTo(29,42,32,42); ctx.quadraticCurveTo(35,42,35,36); ctx.closePath(); ctx.fill(); }
+    else { ctx.fillStyle='rgba(0,0,0,0.08)'; ctx.beginPath(); ctx.moveTo(29,36); ctx.quadraticCurveTo(29,42,32,42); ctx.lineTo(35,36); ctx.closePath(); ctx.fill(); }
+  } else {
+    ctx.beginPath(); ctx.moveTo(30,2); ctx.lineTo(34,2); ctx.lineTo(36,14); ctx.lineTo(36,39); ctx.quadraticCurveTo(36,43,32,43); ctx.quadraticCurveTo(28,43,28,39); ctx.lineTo(28,14); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=fuseLight;
+    ctx.beginPath(); ctx.moveTo(30,3); ctx.lineTo(32,3); ctx.lineTo(32,14); ctx.lineTo(32,40); ctx.lineTo(28,40); ctx.lineTo(28,14); ctx.closePath(); ctx.fill();
+    if(colors.nose) { ctx.fillStyle=colors.nose; ctx.beginPath(); ctx.moveTo(28,37); ctx.quadraticCurveTo(28,43,32,44); ctx.quadraticCurveTo(36,43,36,37); ctx.closePath(); ctx.fill(); }
+    else { ctx.fillStyle='rgba(0,0,0,0.06)'; ctx.beginPath(); ctx.moveTo(29,39); ctx.quadraticCurveTo(29,43,32,43); ctx.lineTo(36,39); ctx.closePath(); ctx.fill(); }
+  }
+  if(colors.fuseStripe){ ctx.fillStyle=colors.fuseStripe; ctx.fillRect(30,14,1,18); ctx.fillRect(34,14,1,18); }
+  ctx.fillStyle='#4488aa'; ctx.beginPath(); ctx.roundRect(29,26,6,11,3); ctx.fill();
+  ctx.fillStyle='#5599bb'; ctx.fillRect(29,27,3,8);
+  ctx.fillStyle='rgba(140,140,140,0.25)'; ctx.fillRect(10,y1,8,2); ctx.fillRect(46,y1,8,2);
+  ctx.fillStyle=tail; ctx.beginPath(); ctx.roundRect(23,2,18,4,1); ctx.fill();
+  ctx.fillStyle=tailLight; ctx.fillRect(24,2,16,2);
+  const rudderColor = colors.rudder || '#d4d4d4';
+  ctx.fillStyle=rudderColor; ctx.beginPath(); ctx.moveTo(31.2,0); ctx.lineTo(32.8,0); ctx.lineTo(33.2,9); ctx.lineTo(30.8,9); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.08)'; ctx.fillRect(33,1,0.5,8);
+  if(airbrakes){ ctx.fillStyle='rgba(204,34,0,0.7)'; ctx.beginPath(); ctx.roundRect(12,24,7,2,0.5); ctx.fill(); ctx.beginPath(); ctx.roundRect(45,24,7,2,0.5); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawLS4(ctx, airbrakes, colors) {
+  colors = colors || {};
+  const tip=colors.tip||'#33aa44', y1=21,y2=27,ym=24,r=1.5;
+  const wingScale = colors.wingScale || 1;
+  if(wingScale !== 1){ ctx.save(); ctx.translate(32,0); ctx.scale(wingScale,1); ctx.translate(-32,0); }
+  ctx.fillStyle='#f0f0f0'; ctx.beginPath(); ctx.roundRect(6,y1,52,y2-y1,r); ctx.fill();
+  ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.moveTo(9,y1); ctx.lineTo(55,y1); ctx.lineTo(53,ym); ctx.lineTo(11,ym); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#d8d8d8'; ctx.beginPath(); ctx.moveTo(11,ym+1); ctx.lineTo(53,ym+1); ctx.lineTo(55,y2); ctx.lineTo(9,y2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(140,130,120,0.1)'; ctx.fillRect(14,ym,36,1);
+  ctx.fillStyle=tip; ctx.beginPath(); ctx.roundRect(6,y1,6,y2-y1,[r,0,0,r]); ctx.fill(); ctx.beginPath(); ctx.roundRect(52,y1,6,y2-y1,[0,r,r,0]); ctx.fill();
+  ctx.fillStyle='rgba(140,140,140,0.25)'; ctx.fillRect(14,y1,10,1.5); ctx.fillRect(40,y1,10,1.5);
+  if(wingScale !== 1) ctx.restore();
+  ctx.save(); ctx.translate(32,22); ctx.scale(1,0.85); ctx.translate(-32,-22);
+  ctx.fillStyle='#e8e8e8'; ctx.beginPath();
+  ctx.moveTo(30,3); ctx.lineTo(34,3); ctx.lineTo(35,14); ctx.lineTo(35,38);
+  ctx.bezierCurveTo(35,42, 33,44, 32,45);
+  ctx.bezierCurveTo(31,44, 29,42, 29,38);
+  ctx.lineTo(29,14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#f4f4f4'; ctx.beginPath(); ctx.moveTo(30,4); ctx.lineTo(32,4); ctx.lineTo(32,40); ctx.lineTo(29,40); ctx.lineTo(29,14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.06)'; ctx.beginPath(); ctx.moveTo(29,38); ctx.quadraticCurveTo(29,42,32,42); ctx.lineTo(35,38); ctx.closePath(); ctx.fill();
+  const canopyH = colors.canopyH || 9;
+  const canopyY = colors.canopyY || 27;
+  ctx.fillStyle='#4488cc'; ctx.beginPath(); ctx.roundRect(30,canopyY,4,canopyH,2); ctx.fill(); ctx.fillStyle='#66aaee'; ctx.fillRect(30,canopyY+1,2,canopyH-2);
+  ctx.fillStyle='#e0e0e0'; ctx.beginPath(); ctx.roundRect(24,1,16,3,1); ctx.fill(); ctx.fillStyle='#f0f0f0'; ctx.fillRect(25,1,14,1.5);
+  if(!colors.tTail) {
+    ctx.fillStyle='#d4d4d4'; ctx.beginPath(); ctx.moveTo(31.2,0); ctx.lineTo(32.8,0); ctx.lineTo(33.2,8); ctx.lineTo(30.8,8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#e4e4e4'; ctx.beginPath(); ctx.moveTo(31.2,0); ctx.lineTo(32,0); ctx.lineTo(32,8); ctx.lineTo(30.8,8); ctx.closePath(); ctx.fill();
+  }
+  if(airbrakes){ ctx.fillStyle='rgba(204,34,0,0.7)'; ctx.beginPath(); ctx.roundRect(12,24,7,2,0.5); ctx.fill(); ctx.beginPath(); ctx.roundRect(45,24,7,2,0.5); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawDiscus(ctx, airbrakes, colors) {
+  colors = colors || {};
+  const y1=22,y2=26,ym=24;
+  ctx.save();
+  ctx.translate(32, 24); ctx.scale(1.15, 1.15); ctx.translate(-32, -24);
+  ctx.fillStyle='#ffffff'; ctx.beginPath();
+  ctx.moveTo(10,y1); ctx.lineTo(42,y1);
+  ctx.quadraticCurveTo(46,y1, 63,ym-0.5);
+  ctx.quadraticCurveTo(58,y2, 50,y2+0.5);
+  ctx.lineTo(10,y2);
+  ctx.lineTo(14,y2); ctx.quadraticCurveTo(6,y2, 1,ym-0.5);
+  ctx.quadraticCurveTo(18,y1, 22,y1);
+  ctx.lineTo(10,y1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.03)'; ctx.beginPath(); ctx.moveTo(10,y1); ctx.lineTo(44,y1); ctx.lineTo(50,ym); ctx.lineTo(12,ym); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.05)'; ctx.beginPath(); ctx.moveTo(12,ym+1); ctx.lineTo(50,ym+1); ctx.lineTo(44,y2); ctx.lineTo(10,y2); ctx.closePath(); ctx.fill();
+  ctx.save(); ctx.translate(32,22); ctx.scale(1,0.85); ctx.translate(-32,-22);
+  ctx.fillStyle='#e8e8e8'; ctx.beginPath();
+  ctx.moveTo(32.5, 2); ctx.lineTo(33, 16);
+  ctx.bezierCurveTo(33,22, 35,24, 35,30);
+  ctx.bezierCurveTo(35,36, 33,43, 32,46);
+  ctx.bezierCurveTo(31,43, 29,36, 29,30);
+  ctx.bezierCurveTo(29,24, 31,22, 31,16);
+  ctx.lineTo(31.5, 2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#f4f4f4'; ctx.beginPath(); ctx.moveTo(31.5, 4); ctx.lineTo(32.5, 4); ctx.lineTo(32, 44); ctx.lineTo(30, 38); ctx.bezierCurveTo(29.5, 32, 30, 16, 31.5, 4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#4488cc'; ctx.beginPath(); ctx.ellipse(32, 33, 2.2, 9, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#66aaee'; ctx.beginPath(); ctx.ellipse(32, 33, 1.2, 7, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#e0e0e0'; ctx.beginPath(); ctx.roundRect(25,1,14,3,1); ctx.fill();
+  ctx.fillStyle='#f0f0f0'; ctx.fillRect(26,1,12,1.5);
+  ctx.fillStyle='#d4d4d4'; ctx.fillRect(31.5,0,1,8);
+  if(airbrakes){ ctx.fillStyle='rgba(204,34,0,0.7)'; ctx.beginPath(); ctx.roundRect(12,24,7,2,0.5); ctx.fill(); ctx.beginPath(); ctx.roundRect(45,24,7,2,0.5); ctx.fill(); }
+  ctx.restore(); ctx.restore();
+}
+
+function drawHPH304(ctx, airbrakes, colors) {
+  colors = colors || {};
+  const tip=colors.tip||'#222222', y1=21,y2=27,ym=24,r=1.5;
+  ctx.fillStyle='#f2f2f2'; ctx.beginPath(); ctx.roundRect(6,y1,52,y2-y1,r); ctx.fill();
+  ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.moveTo(9,y1); ctx.lineTo(55,y1); ctx.lineTo(53,ym); ctx.lineTo(11,ym); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#dcdcdc'; ctx.beginPath(); ctx.moveTo(11,ym+1); ctx.lineTo(53,ym+1); ctx.lineTo(55,y2); ctx.lineTo(9,y2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=tip; ctx.beginPath(); ctx.roundRect(6,y1,6,y2-y1,[r,0,0,r]); ctx.fill(); ctx.beginPath(); ctx.roundRect(52,y1,6,y2-y1,[0,r,r,0]); ctx.fill();
+  ctx.fillStyle='rgba(140,140,140,0.25)'; ctx.fillRect(14,y1,10,1.5); ctx.fillRect(40,y1,10,1.5);
+  ctx.save(); ctx.translate(32,22); ctx.scale(1,0.85); ctx.translate(-32,-22);
+  ctx.fillStyle='#e8e8e8'; ctx.beginPath();
+  ctx.moveTo(31,3); ctx.lineTo(33,3); ctx.lineTo(34,14); ctx.lineTo(34,39);
+  ctx.bezierCurveTo(34,42, 33,43, 32,44);
+  ctx.bezierCurveTo(31,43, 30,42, 30,39);
+  ctx.lineTo(30,14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#f4f4f4'; ctx.beginPath(); ctx.moveTo(31,4); ctx.lineTo(32,4); ctx.lineTo(32,40); ctx.lineTo(30,40); ctx.lineTo(30,14); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle='#4488cc'; ctx.beginPath(); ctx.roundRect(30,29,4,9,2); ctx.fill(); ctx.fillStyle='#66aaee'; ctx.fillRect(30,30,2,5);
+  ctx.fillStyle='#e0e0e0'; ctx.beginPath(); ctx.roundRect(26,1,12,3,1); ctx.fill(); ctx.fillStyle='#f0f0f0'; ctx.fillRect(27,1,10,1.5);
+  ctx.fillStyle='#d4d4d4'; ctx.beginPath(); ctx.moveTo(31.2,0); ctx.lineTo(32.8,0); ctx.lineTo(33.2,8); ctx.lineTo(30.8,8); ctx.closePath(); ctx.fill();
+  // Winglets
+  ctx.fillStyle=tip;
+  ctx.beginPath(); ctx.moveTo(9,21); ctx.lineTo(4,23); ctx.lineTo(4,28); ctx.lineTo(9,27); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(55,21); ctx.lineTo(60,23); ctx.lineTo(60,28); ctx.lineTo(55,27); ctx.closePath(); ctx.fill();
+  if(airbrakes){ ctx.fillStyle='rgba(204,34,0,0.7)'; ctx.beginPath(); ctx.roundRect(12,24,7,2,0.5); ctx.fill(); ctx.beginPath(); ctx.roundRect(45,24,7,2,0.5); ctx.fill(); }
+}
+
+function drawLS4neo(ctx, airbrakes, colors) {
+  drawLS4(ctx, airbrakes, colors);
+  const tip = colors.tip || '#2255bb';
+  ctx.fillStyle=tip;
+  ctx.beginPath(); ctx.moveTo(9,21); ctx.lineTo(4,23); ctx.lineTo(4,28); ctx.lineTo(9,27); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(55,21); ctx.lineTo(60,23); ctx.lineTo(60,28); ctx.lineTo(55,27); ctx.closePath(); ctx.fill();
+}
+
+// Registration → sprite config (synced from melex aircraft.html)
+const SPRITE_FLEET = {
+  'D-7507': { draw: drawASK13, colors: {tip:'#ee7722'} },
+  'D-1800': { draw: drawASK13, colors: {tip:'#224477'} },
+  'D-1670': { draw: drawASK13, colors: {tip:'#0099dd'} },
+  'D-3982': { draw: drawASK13, colors: {tip:'#dd2211'} },
+  'D-1375': { draw: drawASK13, colors: {tip:'#eebb22', nose:'#eebb22', tipInner:18} },
+  'D-1900': { draw: drawASK13, colors: {tip:'#dd2211'} },
+  'D-8474': { draw: drawK8,    colors: {base:'#e8e8e8',baseLight:'#f4f4f4',baseDark:'#d8d8d8',tip:'#dd2211',fuse:'#e0e0e0',fuseLight:'#f0f0f0',tail:'#d8d8d8',tailLight:'#e8e8e8',lineColor:'rgba(140,140,140,0.1)',nose:'#0099dd'} },
+  'D-5096': { draw: drawK8,    colors: {base:'#f0f0f0',baseLight:'#ffffff',baseDark:'#e0e0e0',tip:'#f0f0f0',fuse:'#eeeeee',fuseLight:'#f8f8f8',tail:'#e8e8e8',tailLight:'#f4f4f4',lineColor:'rgba(180,180,180,0.15)'} },
+  'D-7130': { draw: drawK8,    colors: {base:'#e8e8e8',baseLight:'#f4f4f4',baseDark:'#d8d8d8',tip:'#eebb22',fuse:'#e0e0e0',fuseLight:'#f0f0f0',tail:'#eebb22',tailLight:'#f4cc44',lineColor:'rgba(140,140,140,0.1)'} },
+  'D-5343': { draw: drawK8,    colors: {base:'#f0f0f0',baseLight:'#ffffff',baseDark:'#e0e0e0',tip:'#cc2211',fuse:'#cc2211',fuseLight:'#dd3322',tail:'#f0f0f0',tailLight:'#ffffff',lineColor:'rgba(180,180,180,0.15)',rudder:'#cc2211'} },
+  'D-8598': { draw: drawK8,    colors: {base:'#f0f0f0',baseLight:'#ffffff',baseDark:'#e0e0e0',tip:'#f0f0f0',fuse:'#eeeeee',fuseLight:'#f8f8f8',tail:'#e8e8e8',tailLight:'#f4f4f4',lineColor:'rgba(180,180,180,0.15)',fuseStripe:'#2244bb'} },
+  'D-1111': { draw: drawK8,    colors: {base:'#99cc11',baseLight:'#aadd22',baseDark:'#88bb00',tip:'#99cc11',fuse:'#99cc11',fuseLight:'#aadd22',tail:'#99cc11',tailLight:'#aadd22',lineColor:'rgba(80,110,0,0.2)',rudder:'#99cc11'} },
+  'D-1864': { draw: drawLS4,   colors: {tip:'#dd2211', tTail:true, canopyY:31} },
+  'D-7770': { draw: drawLS4,   colors: {tip:'#2255bb', tTail:true, canopyY:31} },
+  'D-8999': { draw: drawLS4,   colors: {tip:'#cc2211', canopyH:14, canopyY:27, tTail:true, wingScale:1.2} },
+  'D-1130': { draw: drawLS4,   colors: {tip:'#cc2211', canopyH:14, canopyY:27, tTail:true, wingScale:1.2} },
+  'D-8250': { draw: drawHPH304,colors: {tip:'#888888', tTail:true} },
+  'D-8251': { draw: drawLS4,   colors: {tip:'#dd2211', tTail:true, canopyY:31} },
+  'D-8252': { draw: drawLS4neo,colors: {tip:'#2255bb', tTail:true, canopyY:31} },
+  'D-1020': { draw: drawK8,    colors: {bluntNose:true} },
+  'D-2249': { draw: drawDiscus,colors: {tip:'#dd2211', tTail:true} },
+};
+
+// Render a sprite to a data URL, rotated to the given heading
+// Sprite natural orientation: nose at bottom (south). Rotate by (heading-180) to face correctly.
+function buildSpriteIcon(registration, trackDeg) {
+  const entry = SPRITE_FLEET[registration];
+  if (!entry) return null;
+  const size = 96;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rot = ((trackDeg || 0) - 180) * Math.PI / 180;
+  ctx.translate(size / 2, size / 2);
+  ctx.rotate(rot);
+  ctx.scale(1.1, 1.1);
+  ctx.translate(-32, -23); // center of aircraft draw-space
+  entry.draw(ctx, false, entry.colors);
+  return {
+    url: canvas.toDataURL('image/png'),
+    scaledSize: new google.maps.Size(48, 48),
+    anchor: new google.maps.Point(24, 24),
+  };
+}
+
+function createGliderIcon(track, type, registration) {
+    if (registration) {
+        const sprite = buildSpriteIcon(registration, track);
+        if (sprite) return sprite;
+    }
     const color = TYPE_COLORS[type] || '#3b82f6';
     const rotation = track || 0;
-    // Top-down glider silhouette: nose up, swept wings, narrow tail
+    // Top-down glider silhouette fallback
     return {
         path: 'M12,1 L23,13 L17,11 L15,23 L12,20 L9,23 L7,11 L1,13 Z',
         fillColor: color,
@@ -235,7 +489,8 @@ function createGliderIcon(track, type) {
 
 async function fetchLive() {
     try {
-        const resp = await fetch(`${API}?action=live&minutes=10`, {credentials: 'same-origin'});
+        const action = DEMO_MODE ? 'demo' : 'live&minutes=10';
+        const resp = await fetch(`${API}?action=${action}`, {credentials: 'same-origin'});
         const data = await resp.json();
         updateMarkers(data.aircraft);
         updateLiveStats(data);
@@ -255,7 +510,7 @@ function updateMarkers(aircraft) {
         if (markers[ac.device_id]) {
             const m = markers[ac.device_id];
             m.setPosition({ lat: ac.latitude, lng: ac.longitude });
-            m.setIcon(createGliderIcon(ac.track_deg, ac.aircraft_type));
+            m.setIcon(createGliderIcon(ac.track_deg, ac.aircraft_type, ac.registration));
             m.setTitle(title);
             if (label) m.setLabel(label); else m.setLabel(null);
             m.acData = ac;
@@ -263,7 +518,7 @@ function updateMarkers(aircraft) {
             const opts = {
                 position: { lat: ac.latitude, lng: ac.longitude },
                 map: map,
-                icon: createGliderIcon(ac.track_deg, ac.aircraft_type),
+                icon: createGliderIcon(ac.track_deg, ac.aircraft_type, ac.registration),
                 title: title,
             };
             if (label) opts.label = label;
