@@ -848,27 +848,7 @@ async function doSearch(e) {
     const resp = await fetch(`${API}?action=config`, {credentials: 'same-origin'});
     const config = await resp.json();
     const script = document.createElement('script');
-    <!-- Timeline bar -->
-<div class="timeline-bar" id="timeline-bar">
-  <div class="timeline-row">
-    <button class="tl-btn" id="tl-playpause" onclick="tlPlayPause()">▶ Play</button>
-    <span class="timeline-time" id="tl-time">00:00</span>
-    <input type="range" class="timeline-slider" id="tl-slider" min="0" max="86400" value="0" step="30" oninput="tlScrub(this.value)">
-    <span class="timeline-time" id="tl-now">--:--</span>
-    <select class="tl-speed" id="tl-speed" title="Playback speed">
-      <option value="30">1×</option>
-      <option value="150">5×</option>
-      <option value="300" selected>10×</option>
-      <option value="900">30×</option>
-      <option value="1800">60×</option>
-    </select>
-    <button class="tl-btn active" id="tl-live-btn" onclick="tlGoLive()">● Live</button>
-  </div>
-  <div class="tl-label" id="tl-label">Drag to rewind · Playback speed: seconds of flight time per real second</div>
-</div>
-
-<script>
-script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=visualization`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=visualization`;
     script.async = true;
     document.head.appendChild(script);
 })();
@@ -1000,5 +980,23 @@ function toggleTimeline() {
     }
 }
 </script>
+<!-- Timeline bar -->
+<div class="timeline-bar" id="timeline-bar">
+  <div class="timeline-row">
+    <button class="tl-btn" id="tl-playpause" onclick="tlPlayPause()">▶ Play</button>
+    <span class="timeline-time" id="tl-time">00:00</span>
+    <input type="range" class="timeline-slider" id="tl-slider" min="0" max="86400" value="0" step="30" oninput="tlScrub(this.value)">
+    <span class="timeline-time" id="tl-now">--:--</span>
+    <select class="tl-speed" id="tl-speed" title="Playback speed">
+      <option value="30">1×</option>
+      <option value="150">5×</option>
+      <option value="300" selected>10×</option>
+      <option value="900">30×</option>
+      <option value="1800">60×</option>
+    </select>
+    <button class="tl-btn active" id="tl-live-btn" onclick="tlGoLive()">● Live</button>
+  </div>
+  <div class="tl-label" id="tl-label">Drag to rewind · Playback speed: seconds of flight time per real second</div>
+</div>
 </body>
 </html>
