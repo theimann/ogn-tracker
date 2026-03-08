@@ -44,23 +44,32 @@ switch ($action) {
     case 'demo':
         $t = time();
 
-        // Circuit waypoints: [lat, lng, alt_m, heading_deg, leg_duration_secs]
+        // Circuit waypoints: [lat, lng, alt_m, leg_duration_secs]
         // Runway 06 (heading 060°/NE), left-hand pattern: circuit to the NW
         // Upwind NE → crosswind NNW → downwind WSW → base SSE → final NE
         $wpts = [
-            [47.7260, 12.4325, 608,  60, 40], // 0: Runway 06 threshold (SW end), liftoff heading NE
-            [47.7340, 12.4480, 740,  60, 25], // 1: End of upwind (past NE end, still climbing)
-            [47.7390, 12.4420, 845, 330, 25], // 2: End of crosswind (N of field)
-            [47.7355, 12.4225, 850, 240, 32], // 3: Mid downwind (NW of field, heading WSW)
-            [47.7270, 12.4070, 845, 240, 28], // 4: End of downwind
-            [47.7215, 12.4150, 790, 150, 25], // 5: End of base (heading SSE)
-            [47.7245, 12.4290, 680,  60, 32], // 6: Final approach
-            [47.7260, 12.4325, 612,  60, 10], // 7: Touchdown / loop back to 0
+            [47.7260, 12.4325, 608, 40], // 0: Runway 06 threshold (SW end)
+            [47.7340, 12.4480, 740, 25], // 1: End of upwind
+            [47.7390, 12.4420, 845, 25], // 2: End of crosswind
+            [47.7355, 12.4225, 850, 32], // 3: Mid downwind
+            [47.7270, 12.4070, 845, 28], // 4: End of downwind
+            [47.7215, 12.4150, 790, 25], // 5: End of base
+            [47.7245, 12.4290, 680, 32], // 6: Final approach
+            [47.7260, 12.4325, 612, 10], // 7: Touchdown
         ];
 
-        // Cumulative time offsets
+        // Compute bearing between two lat/lng points
+        $bearing = function($lat1, $lng1, $lat2, $lng2) {
+            $dL = deg2rad($lng2 - $lng1);
+            $y  = sin($dL) * cos(deg2rad($lat2));
+            $x  = cos(deg2rad($lat1)) * sin(deg2rad($lat2))
+                - sin(deg2rad($lat1)) * cos(deg2rad($lat2)) * cos($dL);
+            return fmod(rad2deg(atan2($y, $x)) + 360, 360);
+        };
+
+        // Cumulative time offsets (duration is now index 3)
         $cum = [0];
-        foreach ($wpts as $w) $cum[] = end($cum) + $w[4];
+        foreach ($wpts as $w) $cum[] = end($cum) + $w[3];
         $total = end($cum);
 
         // Fleet: all do the same circuit, evenly spaced in phase
@@ -96,12 +105,13 @@ switch ($action) {
             }
             $w0 = $wpts[$leg];
             $w1 = $wpts[($leg + 1) % count($wpts)];
-            $f  = ($pos - $cum[$leg]) / $w0[4]; // 0..1 within this leg
+            $f  = ($pos - $cum[$leg]) / $w0[3]; // 0..1 within this leg
 
             $lat   = $w0[0] + ($w1[0] - $w0[0]) * $f;
             $lng   = $w0[1] + ($w1[1] - $w0[1]) * $f;
             $alt   = $w0[2] + ($w1[2] - $w0[2]) * $f;
-            $climb = round(($w1[2] - $w0[2]) / $w0[4] / 1.5, 2);
+            $climb = round(($w1[2] - $w0[2]) / $w0[3] / 1.5, 2);
+            $track = (int)round($bearing($w0[0], $w0[1], $w1[0], $w1[1]));
 
             $aircraft[] = [
                 'device_id'        => 'DEMO' . str_pad($i, 3, '0', STR_PAD_LEFT),
@@ -109,7 +119,7 @@ switch ($action) {
                 'longitude'        => round($lng, 7),
                 'altitude_m'       => (int)round($alt),
                 'ground_speed_kph' => 90.0,
-                'track_deg'        => (int)$w0[3],
+                'track_deg'        => $track,
                 'climb_rate_ms'    => $climb,
                 'aircraft_type'    => $plane['type'],
                 'received_at'      => date('Y-m-d H:i:s'),
