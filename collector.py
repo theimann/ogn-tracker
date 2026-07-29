@@ -224,15 +224,17 @@ def writer_thread(db_pool, influx):
 
 def extract_position(beacon, now_str):
     """Extract structured position data from parsed beacon."""
-    # Convert altitude from feet to meters
+    # ogn.parser has already converted these: parse.py multiplies altitude by
+    # FEETS_TO_METER and climb_rate by FPM_TO_MS. Converting again here shrank
+    # altitude 3.28x and climb 197x for the life of this collector. Ground speed
+    # below was always passed through, which is why it stayed correct.
     alt_m = None
     if beacon.get('altitude'):
-        alt_m = int(beacon['altitude'] * 0.3048)
+        alt_m = int(round(beacon['altitude']))
 
-    # Convert climb rate from fpm to m/s
     climb_ms = None
     if beacon.get('climb_rate') is not None:
-        climb_ms = round(beacon['climb_rate'] * 0.00508, 2)
+        climb_ms = round(beacon['climb_rate'], 2)
 
     # Ground speed: already in km/h in ogn-parser
     speed = beacon.get('ground_speed')
@@ -274,13 +276,13 @@ def build_influx_point(beacon, received_at):
     if beacon.get('longitude'):
         fields['longitude'] = float(beacon['longitude'])
     if beacon.get('altitude'):
-        fields['altitude_m'] = int(beacon['altitude'] * 0.3048)
+        fields['altitude_m'] = int(round(beacon['altitude']))
     if beacon.get('ground_speed') is not None:
         fields['speed_kph'] = float(beacon['ground_speed'])
     if beacon.get('track') is not None:
         fields['track_deg'] = int(beacon['track'])
     if beacon.get('climb_rate') is not None:
-        fields['climb_rate_ms'] = round(beacon['climb_rate'] * 0.00508, 2)
+        fields['climb_rate_ms'] = round(beacon['climb_rate'], 2)
     if beacon.get('turn_rate') is not None:
         fields['turn_rate_dps'] = float(beacon['turn_rate'])
     if beacon.get('signal_quality') is not None:
