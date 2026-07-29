@@ -137,6 +137,83 @@ def get_db_pool():
     )
 
 
+def fleet_budlist(db_pool):
+    """Source callsigns of the tracked fleet, for an APRS-IS budlist filter.
+
+    The range filter truncates a flight the moment it leaves the radius, so a
+    glider going cross-country simply stops being recorded — 19% of fleet flying
+    days were hitting that wall at exactly 30 km. APRS-IS ORs its filters, so
+    adding `b/` entries keeps those aircraft coming in wherever they are while
+    everything else stays bounded by the radius.
+
+    The prefix comes from the address type seen in that aircraft's own packets,
+    not from the DDB: a FLARM may transmit an ICAO address, and five of this
+    fleet do. `device_type` here is the numeric OGN address type — 1 ICAO,
+    2 FLARM, 3 OGN tracker — with 0 meaning random or unstated.
+
+    Read at each connect, so promoting an aircraft takes effect on the next
+    reconnect rather than needing this file edited.
+    """
+    numeric_prefix = {'1': 'ICA', '2': 'FLR', '3': 'OGN'}
+    letter_prefix = {'F': 'FLR', 'O': 'OGN', 'I': 'ICA'}
+    conn = None
+    try:
+        conn = db_pool.get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT f.ogn_device_id,
+                   COALESCE(d.device_type, f.ogn_device_type) AS ddb_type
+            FROM dassu_fleet f
+            LEFT JOIN ogn_ddb d ON d.device_id = f.ogn_device_id
+            WHERE f.ogn_device_id IS NOT NULL
+        """)
+        fleet = {row[0]: row[1] for row in cur.fetchall()}
+        if not fleet:
+            cur.close()
+            return []
+
+        # Modal address type per aircraft, from a bounded recent window so this
+        # stays cheap however large the table grows.
+        placeholders = ','.join(['%s'] * len(fleet))
+        cur.execute(f"""
+            SELECT device_id, device_type, COUNT(*) AS n
+            FROM ogn_positions
+            WHERE device_id IN ({placeholders})
+              AND device_type <> '0'
+              AND received_at > UTC_TIMESTAMP() - INTERVAL 30 DAY
+            GROUP BY device_id, device_type
+        """, tuple(fleet))
+        seen = {}
+        for device_id, device_type, count in cur.fetchall():
+            best = seen.get(device_id)
+            if not best or count > best[1]:
+                seen[device_id] = (device_type, count)
+        cur.close()
+
+        calls = []
+        for device_id, ddb_type in fleet.items():
+            prefix = numeric_prefix.get(str(seen[device_id][0])) if device_id in seen else None
+            if not prefix:
+                prefix = letter_prefix.get((ddb_type or 'F').upper()[:1], 'FLR')
+            calls.append(f"{prefix}{device_id.upper()}")
+        return sorted(set(calls))
+    except Exception as e:
+        # A filter without the budlist still works; losing the fleet's distant
+        # legs is better than not collecting at all.
+        log.error(f"Could not build fleet budlist, using the range filter alone: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def build_aprs_filter(db_pool):
+    calls = fleet_budlist(db_pool)
+    if not calls:
+        return APRS_FILTER
+    return APRS_FILTER + ' b/' + '/'.join(calls)
+
+
 def get_influx():
     """Create InfluxDB client."""
     client = InfluxDBClient(host=INFLUX_HOST, port=INFLUX_PORT, database=INFLUX_DB)
@@ -373,10 +450,13 @@ def main():
             sock.settimeout(60)
             sock.connect((APRS_HOST, APRS_PORT))
 
+            # Rebuilt per connect so a newly promoted aircraft is picked up.
+            active_filter = build_aprs_filter(db_pool)
+
             # Login
-            login_str = f"user {APRS_USER} pass -1 vers ogn-collector 1.0 filter {APRS_FILTER}\r\n"
+            login_str = f"user {APRS_USER} pass -1 vers ogn-collector 1.0 filter {active_filter}\r\n"
             sock.send(login_str.encode())
-            log.info(f"Connected! Filter: {APRS_FILTER}")
+            log.info(f"Connected! Filter: {active_filter}")
 
             sock_file = sock.makefile('rb')
             keepalive_time = time.time()
